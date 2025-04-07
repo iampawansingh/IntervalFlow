@@ -9,24 +9,17 @@ import SwiftUI
 import SwiftData
 
 @main
-struct IntervalFlowApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
-
+struct IntervalFlowAppApp: App { // Renamed from YourAppNameApp
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            // Embed TimerLogicView, potentially within a NavigationStack
+            // if you need navigation to a history view.
+            NavigationStack { // Add NavigationStack for navigation features
+                TimerLogicView()
+                    // Add environment object or modelContext if needed elsewhere
+            }
         }
-        .modelContainer(sharedModelContainer)
+        // Set up the SwiftData container for the TimerSession model
+        .modelContainer(for: TimerSession.self)
     }
 }
