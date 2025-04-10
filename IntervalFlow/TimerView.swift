@@ -6,183 +6,179 @@
 //
 
 import SwiftUI
-import Combine // Needed for Timer.publish and Cancellable
-import AVFoundation // Needed for sound playback AND speech synthesis
+import Combine
+import AVFoundation
 import UIKit
+// Removed SwiftData import
+
+// SwiftData Model Removed
 
 struct TimerLogicView: View {
-    
-    //    @Environment(\.modelContext) private var modelContext
-    
-    //MARK: - User Default Keys
-    // Define keys for saving / loading settings
+
+    // SwiftData Model Context Removed
+
+    // MARK: - UserDefaults Keys
     private enum SettingsKeys {
-        static let timerDuration: String = "timerDurationValue"
-        static let totalReps: String = "totalRepsValue"
-        static let breakDuration: String = "breakDurationValue"
-        static let repsPerBreak: String = "repsPerBreakValue"
-        static let gapDuration: String = "gapDurationValue"
+        static let timerDuration = "timerDurationValue"
+        static let totalReps = "totalRepsValue"
+        static let breakDuration = "breakDurationValue"
+        static let repsPerBreak = "repsPerBreakValue"
+        static let gapDuration = "gapDurationValue"
     }
+
     // MARK: - Input State Variables (Loading from UserDefaults)
-    // Initialize state variables by loading from UserDefaults, providing defaults if no value is saved
     @State private var timerDurationValue: Double = UserDefaults.standard.double(forKey: SettingsKeys.timerDuration).isZero ? 30.0 : UserDefaults.standard.double(forKey: SettingsKeys.timerDuration)
-    @State private var totalRepsValue: Double = UserDefaults.standard.double(forKey: SettingsKeys.totalReps).isZero ? 6.0 : UserDefaults.standard.double(forKey: SettingsKeys.totalReps)
-    @State private var breakDurationValue: Double = UserDefaults.standard.double(forKey: SettingsKeys.breakDuration).isZero ? 8.0 : UserDefaults.standard.double(forKey: SettingsKeys.breakDuration)
-    @State private var repsPerBreakValue: Double = UserDefaults.standard.double(forKey: SettingsKeys.repsPerBreak).isZero ? 3.0 : UserDefaults.standard.double(forKey: SettingsKeys.repsPerBreak)
+    @State private var totalRepsValue: Double = UserDefaults.standard.double(forKey: SettingsKeys.totalReps).isZero ? 10.0 : UserDefaults.standard.double(forKey: SettingsKeys.totalReps)
+    @State private var breakDurationValue: Double = UserDefaults.standard.double(forKey: SettingsKeys.breakDuration).isZero ? 60.0 : UserDefaults.standard.double(forKey: SettingsKeys.breakDuration)
+    @State private var repsPerBreakValue: Double = UserDefaults.standard.double(forKey: SettingsKeys.repsPerBreak).isZero ? 5.0 : UserDefaults.standard.double(forKey: SettingsKeys.repsPerBreak)
     @State private var gapDurationValue: Double = UserDefaults.standard.double(forKey: SettingsKeys.gapDuration).isZero ? 5.0 : UserDefaults.standard.double(forKey: SettingsKeys.gapDuration)
-    
-    
-    
+
     // Define slider ranges
     private let durationRange: ClosedRange<Double> = 1...300
     private let repsRange: ClosedRange<Double> = 1...100
-    private let breakRange: ClosedRange<Double> = 0...300 // Min 0 for no break
-    private let repsPerBreakRange: ClosedRange<Double> = 1...100 // Min 1 rep before break
-    private let gapRange: ClosedRange<Double> = 0...60      // NEW: Range for gap (0-60s)
-    
+    private let breakRange: ClosedRange<Double> = 0...300
+    private let repsPerBreakRange: ClosedRange<Double> = 1...100 // Min is 1, conceptually 0 isn't needed
+    private let gapRange: ClosedRange<Double> = 0...60
+
     // MARK: - Internal Timer State
     @State private var remainingTime: Int = 0
     @State private var currentRep: Int = 0
     @State private var timerIsActive: Bool = false
     @State private var isOnBreak: Bool = false
-    @State private var isInGap: Bool = false // NEW: State for tracking if in the short gap
-    @State private var timerComplete: Bool = false
+    @State private var isInGap: Bool = false
+    @State private var timerComplete: Bool = false // True if stopped OR completed naturally
     @State private var statusMessage: String = "Setup Timer"
-    @State private var activeElapsedTime: Int = 0
-    @State private var sessionStartDate: Date? = nil
-    
+    @State private var activeElapsedTime: Int = 0 // Renamed for clarity - tracks active time
+    @State private var sessionStartDate: Date? = nil // NEW: Track wall-clock start time
+
     // MARK: - Timer Publisher & Subscription
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     @State private var timerSubscription: Cancellable?
-    
+
     // MARK: - Speech Synthesizer
     private let speechSynthesizer = AVSpeechSynthesizer()
-    
-    // MARK: - Computed Properties for Input Values (Casting Double to Int)
+
+    // MARK: - Computed Properties for Input Values
     private var timerDuration: Int { Int(timerDurationValue) }
     private var totalReps: Int { Int(totalRepsValue) }
     private var breakDuration: Int { Int(breakDurationValue) }
     private var repsPerBreak: Int { Int(repsPerBreakValue) }
-    private var gapDuration: Int { Int(gapDurationValue) } // NEW: Computed property for gap
-    
-    //MARK: - NEW: Computed Property for Estimated Total Duration
-    
+    private var gapDuration: Int { Int(gapDurationValue) }
+
+    // MARK: - Computed Property for Estimated Total Duration
     private var estimatedTotalDuration: Int {
-        var estimated: Int = 0
-        let work  = timerDuration
-        let reps = totalReps
-        let gap = gapDuration
-        let longBreak = breakDuration
-        let repsBeforeBreak = repsPerBreak
-        
+        var estimated: Int = 0; let work = timerDuration; let reps = totalReps; let gap = gapDuration; let longBreak = breakDuration; let repsBeforeBreak = repsPerBreak
+        guard work > 0 && reps > 0 else { return 0 }
         for i in 1...reps {
             estimated += work
-            if i < reps { // Add gap or break *after* the rep, unless it's the last one
-                let isBreakTime = longBreak > 0 && repsBeforeBreak > 0 && (i % repsBeforeBreak == 0)
-                if isBreakTime {
-                    estimated += longBreak // Add long break duration
-                } else if gap > 0 {
-                    estimated += gap // Add gap duration
-                }
-            }
-            
+            if i < reps { let isBreakTime = longBreak > 0 && repsBeforeBreak > 0 && (i % repsBeforeBreak == 0); if isBreakTime { estimated += longBreak } else if gap > 0 { estimated += gap } }
         }
         return estimated
     }
-    
+
     // MARK: - Formatter for TextFields
     private static var numberFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.maximumFractionDigits = 0
-        formatter.zeroSymbol = ""
-        return formatter
+        let formatter = NumberFormatter(); formatter.numberStyle = .decimal; formatter.maximumFractionDigits = 0; formatter.zeroSymbol = ""; return formatter
     }()
-    
+
     // MARK: - Body
     var body: some View {
-        VStack(spacing: 15) {
-            // --- Timer Status Display ---
-            Text(statusMessage)
-                .font(.headline)
-                .padding(.bottom, 10)
-            
-            Text("Rep: \(currentRep) / \(totalReps)")
-                .font(.title2)
-            Text("Time: \(formattedTime(remainingTime))")
-                .font(.system(size: 60, weight: .bold, design: .rounded))
-                .padding(.bottom, 20)
-            Text("Estimated Session Time: \(formattedTime(estimatedTotalDuration))")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.bottom, 10)
-            
-            // --- Input Controls (Sliders + TextFields) ---
-            VStack(alignment: .leading, spacing: 15) {
-                inputControlRow(label: "Work Duration", value: $timerDurationValue, range: durationRange, unit: "sec")
-                inputControlRow(label: "Total Repetitions", value: $totalRepsValue, range: repsRange, unit: "")
-                // NEW: Input row for Gap Duration
-                inputControlRow(label: "Gap Duration", value: $gapDurationValue, range: gapRange, unit: "sec")
-                inputControlRow(label: "Break Duration", value: $breakDurationValue, range: breakRange, unit: "sec")
-                    .disabled(Int(repsPerBreakValue) == 0)
-                inputControlRow(label: "Reps Before Break", value: $repsPerBreakValue, range: repsPerBreakRange, unit: "")
-                    .disabled(Int(breakDurationValue) == 0)
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 20)
-            .disabled(timerIsActive || timerComplete)
-            // --- ADDED onChange modifiers to SAVE settings
-            .onChange(of: timerDurationValue,{_, newValue in UserDefaults.standard.set(newValue, forKey: SettingsKeys.timerDuration)})
-            .onChange(of: totalRepsValue,{_, newValue in UserDefaults.standard.set(newValue, forKey: SettingsKeys.totalReps)})
-            .onChange(of: gapDurationValue,{_, newValue in UserDefaults.standard.set(newValue, forKey: SettingsKeys.gapDuration)})
-            .onChange(of: breakDurationValue,{_, newValue in UserDefaults.standard.set(newValue, forKey: SettingsKeys.breakDuration)
-                if newValue==0{
-                    repsPerBreakValue = repsPerBreakRange.upperBound
-                }
-            })
-            .onChange(of: repsPerBreakValue,{_, newValue in UserDefaults.standard.set(newValue, forKey: SettingsKeys.repsPerBreak)})
-            // --- Control Buttons ---
-            HStack(spacing: 30) {
-                Button {
-                    if timerIsActive {
-                        pauseTimer()
-                    } else {
-                        startTimer()
-                    }
-                } label: {
-                    Image(systemName: timerIsActive ? "pause.fill" : "play.fill")
-                        .imageScale(.large)
-                    Text(timerIsActive ? "Pause" : "Start")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(timerComplete)
-                .tint(timerIsActive ? .orange : .green)
-                
-                Button{stopTimer()
-                } label: {
-                    Image(systemName: "stop.fill")
-                    Text("Stop")
-                }
-                
-                Button {
-                    resetTimer()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .imageScale(.large)
-                    Text("Reset")
-                }
-                .buttonStyle(.bordered)
-                .tint(.red)
-            }
-            if timerComplete{
-                let wallClockDuration = Date().timeIntervalSince(sessionStartDate ?? Date())
-                Text("Total Session Time: \(formattedTime(Int(wallClockDuration)))")
+        // Outermost VStack to attach tap gesture for keyboard dismissal
+        VStack {
+            VStack(spacing: 15) {
+                // --- Timer Status Display ---
+                Text(statusMessage)
                     .font(.headline)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 20)
+                    .padding(.bottom, 10)
+
+                Text("Rep: \(currentRep) / \(totalReps)")
+                    .font(.title2)
+                Text("Time: \(formattedTime(remainingTime))")
+                    .font(.system(size: 60, weight: .bold, design: .rounded))
+                Text("Estimated Total: \(formattedTime(estimatedTotalDuration))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.bottom, 10)
+
+                // --- Input Controls (Sliders + TextFields) ---
+                VStack(alignment: .leading, spacing: 15) {
+                    inputControlRow(label: "Work Duration", value: $timerDurationValue, range: durationRange, unit: "sec")
+                    inputControlRow(label: "Total Repetitions", value: $totalRepsValue, range: repsRange, unit: "")
+                    inputControlRow(label: "Gap Duration", value: $gapDurationValue, range: gapRange, unit: "sec")
+                    inputControlRow(label: "Break Duration", value: $breakDurationValue, range: breakRange, unit: "sec")
+                        .disabled(Int(repsPerBreakValue) == 0) // Should not happen if min is 1
+                    inputControlRow(label: "Reps Before Break", value: $repsPerBreakValue, range: repsPerBreakRange, unit: "")
+                         .disabled(Int(breakDurationValue) == 0)
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 20)
+                .disabled(timerIsActive || timerComplete) // Disable inputs when timer running or finished/stopped
+                .onChange(of: timerDurationValue) { _, newValue in UserDefaults.standard.set(newValue, forKey: SettingsKeys.timerDuration) }
+                .onChange(of: totalRepsValue) { _, newValue in UserDefaults.standard.set(newValue, forKey: SettingsKeys.totalReps) }
+                .onChange(of: breakDurationValue) { _, newValue in
+                    UserDefaults.standard.set(newValue, forKey: SettingsKeys.breakDuration)
+                    // NEW: If break duration becomes 0, set reps before break to minimum (1)
+                    if newValue == 0 {
+                        repsPerBreakValue = repsPerBreakRange.lowerBound // Set to 1
+                    }
+                }
+                .onChange(of: repsPerBreakValue) { _, newValue in UserDefaults.standard.set(newValue, forKey: SettingsKeys.repsPerBreak) }
+                .onChange(of: gapDurationValue) { _, newValue in UserDefaults.standard.set(newValue, forKey: SettingsKeys.gapDuration) }
+
+
+                // --- Control Buttons ---
+                HStack(spacing: 20) { // Adjusted spacing
+                    Button { // Start / Pause Button
+                        if timerIsActive { pauseTimer() }
+                        else { startTimer() }
+                    } label: {
+                        Image(systemName: timerIsActive ? "pause.fill" : "play.fill")
+                        Text(timerIsActive ? "Pause" : "Start")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(timerComplete) // Disable if stopped/completed
+                    .tint(timerIsActive ? .orange : .green)
+
+                    // NEW: Stop Button
+                    Button {
+                        stopTimer()
+                    } label: {
+                        Image(systemName: "stop.fill")
+                        Text("Stop")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .disabled(!timerIsActive) // Only enable Stop when timer is active
+
+                    Button { // Reset Button
+                        resetTimer()
+                    } label: {
+                         Image(systemName: "arrow.clockwise")
+                        Text("Reset")
+                    }
+                    .buttonStyle(.bordered)
+                    //.tint(.gray) // Optional different tint for reset
+                }
+                .imageScale(.medium) // Adjust icon size in buttons
+
+
+                // --- Display Total Session Time (including pause) on Completion/Stop ---
+                if timerComplete {
+                    // Calculate wall-clock duration when needed
+                    let wallClockDuration = Date().timeIntervalSince(sessionStartDate ?? Date())
+                    Text("Total Session Time (including pause): \(formattedTime(Int(wallClockDuration)))")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 20)
+                }
+
             }
+            .padding()
         }
-        .padding()
+        // NEW: Tap gesture to dismiss keyboard
+        .onTapGesture {
+            hideKeyboard()
+        }
         .onReceive(timer) { _ in
             if timerSubscription != nil && timerIsActive {
                 updateTimer()
@@ -193,7 +189,7 @@ struct TimerLogicView: View {
             pauseTimer()
         }
     }
-    
+
     // MARK: - Reusable Input Control Row View Builder
     @ViewBuilder
     private func inputControlRow(label: String, value: Binding<Double>, range: ClosedRange<Double>, unit: String) -> some View {
@@ -206,49 +202,48 @@ struct TimerLogicView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 60)
                     .multilineTextAlignment(.trailing)
-                // Updated onChange signature to address deprecation warning
-                    .onChange(of: value.wrappedValue) { oldValue, newValue in
-                        let clampedValue = min(max(newValue, range.lowerBound), range.upperBound)
-                        if clampedValue != newValue {
-                            // Use DispatchQueue to avoid modifying state during view update cycle
-                            DispatchQueue.main.async {
-                                value.wrappedValue = clampedValue
-                            }
-                        }
+                    .onChange(of: value.wrappedValue) { oldValue, newValue in // Keep this for clamping
+                         let clampedValue = min(max(newValue, range.lowerBound), range.upperBound)
+                         if clampedValue != newValue {
+                             DispatchQueue.main.async {
+                                 value.wrappedValue = clampedValue
+                             }
+                         }
                     }
             }
         }
     }
-    
-    
+
+
     // MARK: - Timer Control Functions
     func startTimer() {
         guard !timerIsActive else { return }
+        hideKeyboard() // Dismiss keyboard on start
         if currentRep == 0 {
             guard totalReps > 0 && timerDuration > 0 else {
                 statusMessage = "Invalid settings (Reps/Duration > 0)"
                 return
             }
-            activeElapsedTime = 0
-            sessionStartDate = Date()
+            activeElapsedTime = 0 // Reset active time counter
+            sessionStartDate = Date() // Record wall-clock start time
             remainingTime = timerDuration
             currentRep = 1
             isOnBreak = false
-            isInGap = false // Ensure not in gap initially
+            isInGap = false
             timerComplete = false
             statusMessage = "Work Interval \(currentRep)"
-            speak("Start") // Announce start on initial press
+            speak("Start")
         } else {
-            // Resuming from pause
-            updateStatusMessage() // Update status based on current state (work/break/gap)
+             // Resuming from pause
+             updateStatusMessage()
+             // Do NOT reset sessionStartDate here
         }
         timerSubscription = timer.sink { _ in }
         timerIsActive = true
         UIApplication.shared.isIdleTimerDisabled = true
         print("Screen lock disabled")
-        
     }
-    
+
     func pauseTimer() {
         timerSubscription?.cancel()
         timerSubscription = nil
@@ -256,211 +251,137 @@ struct TimerLogicView: View {
         if !timerComplete {
             statusMessage = "Paused"
         }
-        // Stop speech if timer is paused
         speechSynthesizer.stopSpeaking(at: .immediate)
         UIApplication.shared.isIdleTimerDisabled = false
-        print("Screen lock enabled")
+        print("Screen lock enabled (paused)")
+        // Note: sessionStartDate is NOT reset on pause
     }
-    
+
+    // NEW: Stop Timer Function
     func stopTimer() {
-        guard timerIsActive else { return }
-        hideKeyboard()
+        guard timerIsActive else { return } // Only stop if active
+        hideKeyboard() // Dismiss keyboard on stop
         timerSubscription?.cancel()
         timerSubscription = nil
         timerIsActive = false
-        timerComplete = true
+        timerComplete = true // Mark as complete to show final time
         statusMessage = "Stopped"
         speechSynthesizer.stopSpeaking(at: .immediate)
         UIApplication.shared.isIdleTimerDisabled = false
         print("Screen lock enabled (stopped)")
+        // Keep activeElapsedTime and sessionStartDate for final calculation display
+        // SwiftData Saving Removed
     }
-    
+
+
     func resetTimer() {
-        hideKeyboard()
-        pauseTimer() // Also stops speech
+        hideKeyboard() // Dismiss keyboard on reset
+        // SwiftData Saving Removed
+        pauseTimer() // Stops timer, speech, enables screen lock
         currentRep = 0
         remainingTime = 0
-        activeElapsedTime = 0
-        sessionStartDate = nil
         isOnBreak = false
-        isInGap = false // Reset gap state
-        timerComplete = false
+        isInGap = false
+        timerComplete = false // Reset completion flag
+        activeElapsedTime = 0 // Reset active time counter
+        sessionStartDate = nil // Reset wall-clock start time
         statusMessage = "Setup Timer"
-        // Reset test values including gap
-        //         timerDurationValue = 10.0
-        //         totalRepsValue = 6.0
-        //         breakDurationValue = 8.0
-        //         repsPerBreakValue = 3.0
-        //         gapDurationValue = 5.0 // Reset gap duration
-        //         totalElapsedTime = 0
     }
-    
+
     // MARK: - Core Timer Update Logic
-    
     func updateTimer() {
         guard timerIsActive else { return }
-        
         if remainingTime > 0 {
             remainingTime -= 1
-            activeElapsedTime+=1
-            
-            // --- Speak countdown during last 5 seconds of break OR work interval (NOT gap) ---
+            activeElapsedTime += 1 // Increment active time
             let shouldSpeakCountdown = remainingTime <= 5 && remainingTime > 0
-            
-            if shouldSpeakCountdown && !isInGap { // Exclude gap from countdown
-                speak("\(remainingTime)") // Speak "5", "4", "3", "2", "1"
+            if shouldSpeakCountdown && !isInGap {
+                 speak("\(remainingTime)")
             }
-            // --- End of countdown section ---
-            
         }
-        
-        // Check for interval completion *after* decrementing and potential speech
         if remainingTime <= 0 {
             handleIntervalCompletion()
         }
     }
-    
-    // MARK: - Interval Completion Logic (Restructured for Gap)
-    
+
+    // MARK: - Interval Completion Logic
     func handleIntervalCompletion() {
-        // --- Priority 1: Check if a GAP interval just finished ---
         if isInGap {
-            isInGap = false // Exit gap state
-            currentRep += 1 // Increment rep *after* the gap
-            remainingTime = timerDuration // Start next work interval
-            isOnBreak = false // Ensure not on break
-            updateStatusMessage()
-            speak("Start") // Announce start of the next work interval
-            return // Handled gap completion, exit function
+            isInGap = false; currentRep += 1; remainingTime = timerDuration; isOnBreak = false; updateStatusMessage(); speak("Start"); return
         }
-        
-        // --- Priority 2: Check if a WORK interval just finished ---
-        if !isOnBreak { // Note: We already know !isInGap from check above
-            playSound() // Play sound cue for work rep completion
-            
-            // Check if all repetitions are completed
-            if currentRep >= totalReps {
-                statusMessage = "Session Complete!"
-                timerComplete = true
-                pauseTimer()
-                speak("Session Complete!")
-                // saveSession(...)
-                
-                return // Sequence finished
+        if !isOnBreak { // Work interval finished
+             playSound()
+            if currentRep >= totalReps { // Sequence complete
+                statusMessage = "Timer Complete!"; timerComplete = true; pauseTimer(); speak("Timer Complete!")
+                // SwiftData Saving Removed
+                return
             }
-            
-            // Determine if it's time for a long break
+            // Decide next step: Break, Gap, or Next Rep
             let shouldTakeBreak = breakDuration > 0 && repsPerBreak > 0 && (currentRep % repsPerBreak == 0)
-            
             if shouldTakeBreak {
-                // Start Long Break
-                isOnBreak = true
-                remainingTime = breakDuration
-                updateStatusMessage()
-                speak("Break time")
-            } else {
-                // Check if we need a short gap before the next rep
+                isOnBreak = true; remainingTime = breakDuration; updateStatusMessage(); speak("Break time")
+            } else { // No long break, check for gap
                 if gapDuration > 0 {
-                    // Start Short Gap
-                    isInGap = true
-                    remainingTime = gapDuration
-                    updateStatusMessage()
-                    speak("Change")
-                    // No "Start" announcement here, wait until after the gap
-                } else {
-                    // No gap, start next work interval immediately
-                    currentRep += 1
-                    remainingTime = timerDuration
-                    isOnBreak = false // Ensure not on break
-                    updateStatusMessage()
-                    // Announce "Start" only if it's not the very first rep (handled in startTimer)
-                    if currentRep > 1 {
-                        speak("Start")
-                    }
+                    isInGap = true; remainingTime = gapDuration; updateStatusMessage()
+                    speak("Change") // <--- ADDED: Announce change into gap
+                } else { // No gap, start next rep immediately
+                    currentRep += 1; remainingTime = timerDuration; isOnBreak = false; updateStatusMessage()
+                    if currentRep > 1 { speak("Start") }
                 }
             }
-            return // Handled work completion, exit function
+            return
         }
-        
-        // --- Priority 3: Check if a BREAK interval just finished ---
-        // This runs only if !isInGap and isOnBreak was true
-        else {
-            // Break finished, start next work interval
-            currentRep += 1
-            remainingTime = timerDuration
-            isOnBreak = false // Exit break state
-            updateStatusMessage()
-            
-            // Check for completion immediately after break finishes
-            if currentRep > totalReps {
-                statusMessage = "Timer Complete!"
-                timerComplete = true
-                pauseTimer()
-                speak("Timer Complete!")
-                // saveSession(...)
+        else { // Break finished
+            currentRep += 1; remainingTime = timerDuration; isOnBreak = false; updateStatusMessage()
+            if currentRep > totalReps { // Sequence complete (unlikely here, but safety check)
+                 statusMessage = "Timer Complete!"; timerComplete = true; pauseTimer(); speak("Timer Complete!")
+                 // SwiftData Saving Removed
             } else {
-                // Announce "Start" when moving from break to work
-                speak("Start")
+                speak("Start") // Announce start after break
             }
-            return // Handled break completion, exit function
+            return
         }
     }
-    
+
+    // SwiftData Save Function Removed
+
     // MARK: - Helper Functions
-    
-    // Updates the status message based on the current state
     func updateStatusMessage() {
-        if isInGap {
-            statusMessage = "Gap Time"
-        } else if isOnBreak {
-            statusMessage = "Break Time"
-        } else if timerIsActive { // Only show work interval if timer is running
-            statusMessage = "Work Interval \(currentRep)"
-        }
-        // Keep "Paused" or "Timer Complete!" if applicable (handled elsewhere)
+        if isInGap { statusMessage = "Gap Time" }
+        else if isOnBreak { statusMessage = "Break Time" }
+        else if timerIsActive { statusMessage = "Work Interval \(currentRep)" }
+        else if !timerComplete && !timerIsActive && currentRep > 0 { statusMessage = "Paused" }
+        else if !timerComplete && !timerIsActive && currentRep == 0 { statusMessage = "Setup Timer" }
+        // Note: "Stopped" and "Timer Complete!" are set directly
     }
-    
-    
     func formattedTime(_ seconds: Int) -> String {
-        let minutes = seconds / 60
-        let remainingSeconds = seconds % 60
+        let minutes = seconds / 60; let remainingSeconds = seconds % 60
         return String(format: "%02d:%02d", minutes, remainingSeconds)
     }
-    
-    func playSound() {
-        AudioServicesPlaySystemSound(SystemSoundID(1306))
-        print("Sound Played")
-    }
-    
+    func playSound() { AudioServicesPlaySystemSound(SystemSoundID(1306)); print("Sound Played") }
+
+    // --- MODIFIED speak Function ---
     func speak(_ phrase: String) {
-        if phrase == "Break time" || phrase == "Start" || phrase == "Timer Complete!" {
-            speechSynthesizer.stopSpeaking(at: .immediate)
-        } else if speechSynthesizer.isSpeaking {
-            if let currentUtterance = speechSynthesizer.value(forKey: "utterance") as? AVSpeechUtterance,
-               let currentNumber = Int(currentUtterance.speechString),
-               let nextNumber = Int(phrase), nextNumber == currentNumber - 1 {
-                // Allow countdown
-            } else {
-                speechSynthesizer.stopSpeaking(at: .immediate)
-            }
-        }
+        // FIX: Removed problematic KVC check. Always stop previous speech immediately.
+        speechSynthesizer.stopSpeaking(at: .immediate)
+
         let utterance = AVSpeechUtterance(string: phrase)
+        // utterance.voice = AVSpeechSynthesisVoice(language: "en-US") // Optional: Set voice
+        // utterance.rate = 0.5 // Optional: Adjust rate (0.0 to 1.0)
+        // utterance.pitchMultiplier = 1.0 // Optional: Adjust pitch (0.5 to 2.0)
         speechSynthesizer.speak(utterance)
         print("Speaking: \(phrase)")
     }
-    
-    // Placeholder for saving data
-    // func saveSession(reps: Int, duration: Int, /*... other params ...*/) {
-    //     print("Saving session: Reps=\(reps), Duration=\(duration)")
-    //     // Add SwiftData saving code here
-    // }
-    
+    // --- End Modified Section ---
+
+    // NEW: Function to dismiss keyboard
     func hideKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
+         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+     }
 }
 
 // MARK: - Preview
 #Preview {
-    TimerLogicView()
+     // Removed model container setup
+     TimerLogicView()
 }
